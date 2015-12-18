@@ -32,12 +32,6 @@ test = pd.read_json('test_data.json')
 # normalize ing2vec_array
 ing2vec_array = np.add(ing2vec_array, -np.mean(ing2vec_array)) / np.std(ing2vec_array)
 
-for string in ingredient_list :
-	if string.find("vanilla")!=-1 :
-		print string.encode('utf-8')+"\t"+str(ingredient_book[string])
-find_closest(ing2vec_array[441,:]-ing2vec_array[1958,:]+ing2vec_array[364,:], ing2vec_array, ingredient_list)		
-stop
-
 for i in range(train.shape[0]) :
 	ingredient_list = train.loc[i, 'ingredients']
 	cuisine = train.loc[i, 'cuisine']
@@ -67,7 +61,7 @@ val_num = 1774
 
 input = T.matrix(name='input')
 p = theano.shared(0.3)
-classify_network = ClassifyNetwork.ClassifyNetwork(input, 700, 400, p)
+classify_network = ClassifyNetwork.ClassifyNetwork(input, 500, 350, p)
 learning_rate = 0.2
 
 y = T.matrix(name='y')
@@ -81,13 +75,13 @@ for param_i, grad_i, paramin_i in zip(params, grad, paramins) :
 	updates.append((param_i, param_i - (learning_rate/math.sqrt(paramin_i))*grad_i))
 
 f = theano.function([input, y], cost, updates=updates)
-test_f = theano.function([input], [classify_network.hidden1, classify_network.hidden2, classify_network.output])
+test_f = theano.function([input], classify_network.output)
 
-for epoch in range(10) :
+for epoch in range(0) :
 	random_idx = np.random.permutation(train_num) # shuffle order randomly
 	
 	for i in range(train_num) :
-		if i%10==0 : print str(i)
+		if i%2000==0 : print str(i)
 		now_recipe = train.loc[random_idx[i]]
 		# use ingredients that we already have
 		temp_ingredient_list = now_recipe['ingredients']
@@ -100,32 +94,23 @@ for epoch in range(10) :
 		now_y = np.zeros((1, 20), dtype=theano.config.floatX)
 		now_y[0, cuisine_book[now_recipe['cuisine']]]=1.0
 
-		input_vector = np.zeros((1, 5*200), dtype=theano.config.floatX)
-		# if ingredeint number is 0 (maybe possible), just continue
-		if ingredient_num == 0 : continue
-		# if ingredient number is same or less then 5, just randomly distribute it
-		if ingredient_num <= 5 :
-			random_ing_idx = np.random.permutation(5)
-			for j in range(ingredient_num) :
-				idx = random_ing_idx[j]
-				ing_id = ingredient_book[now_ingredient_list[j]]
-				input_vector[0, idx*200:(idx+1)*200] = ing2vec_array[ing_id, :]
-			nowcost = f(input_vector, now_y)
-		# else, randomly take 5 ingredients and try for few times
-		else :
-			for run_epoch in range(3) :
-				random_ing_idx = np.random.permutation(ingredient_num)
-				for j in range(5) :
-					ing_id = ingredient_book[now_ingredient_list[random_ing_idx[j]]]
-					input_vector[0, j*200:(j+1)*200] = ing2vec_array[ing_id, :]
-				nowcost = f(input_vector, now_y)
+		# make input vector
+		input_vector = np.zeros((1, 200), dtype=theano.config.floatX)
+		for ing_name in now_ingredient_list :
+			ing_id = ingredient_book[ing_name]
+			input_vector += ing2vec_array[ing_id,:]
+		# normalize it 
+		input_vector = input_vector / np.linalg.norm(input_vector, axis=1)[0]
+
+		# run
+		nowcost = f(input_vector, now_y)
 
 		# learning rate decay
-		if i%19000==0 and i>0 and epoch<4:
+		if i%19000==0 and i>0 and epoch>=2 and epoch<6:
 			learning_rate *= 0.7
 
 		# validation data check : just once
-		if i%1000==0 and i>0:
+		if i%19000==0 and (i>0 or epoch>0):
 			p.set_value(0.0)
 			print "Validation data check for epoch %d, iteration %d" % (epoch, i)
 			error_num = 0.0
@@ -133,33 +118,49 @@ for epoch in range(10) :
 				now_recipe = train.loc[train_num+j]
 				temp_ingredient_list = now_recipe['ingredients']
 				now_ingredient_list = []
-				for i in range(len(now_ingredient_list)) :
-					if temp_ingredient_list[i] in ingredient_book : now_ingredient_list.append(temp_ingredient_list[i])
+				for ing_name in temp_ingredient_list :
+					if ing_name in ingredient_book : now_ingredient_list.append(ing_name)
 				ingredient_num = len(now_ingredient_list)
 
-				input_vector = np.zeros((1, 5*200), dtype=theano.config.floatX)
-				# if ingredient number is same or less then 5, just randomly distribute it
-				if ingredient_num <= 5 :
-					random_ing_idx = np.random.permutation(5)
-					for j in range(ingredient_num) :
-						idx = random_ing_idx[j]
-						ing_id = ingredient_book[now_ingredient_list[j]]
-						input_vector[0, idx*200:(idx+1)*200] = ing2vec_array[ing_id, :]
-				# else, randomly take 5 ingredients
-				else :
-					random_ing_idx = np.random.permutation(ingredient_num)
-					for j in range(5) :
-						ing_id = ingredient_book[now_ingredient_list[random_ing_idx[j]]]
-						input_vector[0, j*200:(j+1)*200] = ing2vec_array[ing_id, :]
-				hidden1, hidden2, result = test_f(input_vector)
-				print np.amax(result, axis=1)
-				#print hidden1
-				#print hidden2
-				#print result
+				# make input vector
+				input_vector = np.zeros((1, 200), dtype=theano.config.floatX)
+				for ing_name in now_ingredient_list :
+					ing_id = ingredient_book[ing_name]
+					input_vector += ing2vec_array[ing_id,:]
+				# normalize it 
+				input_vector = input_vector / np.linalg.norm(input_vector, axis=1)[0]
+
+				result = test_f(input_vector)
 				if result.argmax(axis=1)[0] != cuisine_book[now_recipe['cuisine']] :
 					error_num += 1.0
 			error_rate = error_num / val_num
 			print "Error rate : %f" % error_rate
 			p.set_value(0.3)
 
+columns=['id', 'cuisine']
+final_data = pd.DataFrame(index=np.arange(test.shape[0]), columns=columns)
 
+# final : write csv
+p.set_value(0.0)
+for i in range(test.shape[0]) :
+	print i
+	now_recipe = test.loc[i]
+	# use ingredients that we already have
+	temp_ingredient_list = now_recipe['ingredients']
+	now_ingredient_list = []
+	for ing_name in temp_ingredient_list :
+		if ing_name in ingredient_book : now_ingredient_list.append(ing_name)
+	ingredient_num = len(now_ingredient_list)
+
+	# make input vector
+	input_vector = np.zeros((1, 200), dtype=theano.config.floatX)
+	for ing_name in now_ingredient_list :
+		ing_id = ingredient_book[ing_name]
+		input_vector += ing2vec_array[ing_id,:]
+	# normalize it 
+	input_vector = input_vector / np.linalg.norm(input_vector, axis=1)[0]
+	result = test_f(input_vector).argmax(axis=1)
+	final_data.loc[i, 'id'] = now_recipe['id']
+	final_data.loc[i, 'cuisine'] = cuisine_list[result]
+
+final_data.to_csv("result.csv", encoding='utf-8', index=False)

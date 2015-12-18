@@ -12,7 +12,7 @@ class ClassifyNetwork(object) :
 		# hidden2_size = hidden layer 2's size
 		# p = Dropconnect rate : shared variable
 
-		input_num = 1000
+		input_num = 200
 		w1_bound = math.sqrt(input_num)
 		w2_bound = math.sqrt(hidden1_size)
 		w3_bound = math.sqrt(hidden2_size)
