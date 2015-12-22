@@ -25,10 +25,13 @@ train = pd.read_json('train_data.json') # 39774 datas
 test = pd.read_json('test_data.json')
 ingredient_book = {}
 ing_list = []
+ing_counting = []
 cuisine_book = {}
 cuisine_list = []
 ing_book_count = 0
 cui_book_count = 0
+cuisine_rate = np.zeros((6696, 20))
+
 
 for i in range(train.shape[0]) :
 	ingredient_list = train.loc[i, 'ingredients']
@@ -46,7 +49,10 @@ for i in range(train.shape[0]) :
 		if not (ingredient_list[j] in ingredient_book) :
 			ingredient_book[ingredient_list[j]] = ing_book_count
 			ing_list.append(ingredient_list[j])
+			ing_counting.append([0, ingredient_list[j]])
 			ing_book_count += 1
+		ing_counting[ingredient_book[ingredient_list[j]]][0]+=1.0
+		cuisine_rate[ingredient_book[ingredient_list[j]], cuisine_book[cuisine]]+=1.0 
 
 for i in range(test.shape[0]) :
 	ingredient_list = test.loc[i, 'ingredients']

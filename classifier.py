@@ -30,6 +30,8 @@ test = pd.read_json('test_data.json')
 
 # normalize ing2vec_array
 ing2vec_array = np.add(ing2vec_array, -np.mean(ing2vec_array)) / np.std(ing2vec_array)
+# top 10 frequent ingredients
+frequent_list = ['salt', 'onions', 'olive oil', 'water', 'garlic', 'sugar', 'garlic cloves', 'butter', 'ground black pepper', 'all-purpose flour']
 
 for i in range(train.shape[0]) :
 	ingredient_list = train.loc[i, 'ingredients']
@@ -55,14 +57,14 @@ for i in range(test.shape[0]) :
 # use first 38000 for training, last 1774 for validation
 train_num = 38000
 val_num = 1774
-try_size = 10
+try_size = 1
 
 # use randomly chosen 5 ingredients to train the network
 
 input = T.matrix(name='input')
 p = theano.shared(0.3)
-classify_network = ClassifyNetwork.ClassifyNetwork(input, 140, 0, p, try_size)
-learning_rate = 0.05
+classify_network = ClassifyNetwork.ClassifyNetwork(input, 400, 320, 280, p, try_size)
+learning_rate = 0.1
 
 y = T.matrix(name='y')
 cost = T.nnet.categorical_crossentropy(classify_network.output, y).sum()
@@ -77,11 +79,11 @@ for param_i, grad_i, paramin_i in zip(params, grad, paramins) :
 f = theano.function([input, y], cost, updates=updates)
 test_f = theano.function([input], classify_network.output)
 
-for epoch in range(10) :
+for epoch in range(100) :
 	random_idx = np.random.permutation(train_num) # shuffle order randomly
 	
 	for i in range(train_num) :
-		if i%1000==0 : print i
+		if i%2000==0 : print str(i)
 		now_recipe = train.loc[random_idx[i]]
 		# use ingredients that we already have
 		temp_ingredient_list = now_recipe['ingredients']
@@ -95,35 +97,24 @@ for epoch in range(10) :
 		now_y[0, cuisine_book[now_recipe['cuisine']]]=1.0
 
 		# make input vector
-		input_vector = np.zeros((1, try_size*200), dtype=theano.config.floatX)
-		# if ingredeint number is 0 (maybe possible), just continue
-		if ingredient_num == 0 : continue
-		# if ingredient number is same or less than try_size, randomly distribute it
-		if ingredient_num <= try_size :
-			random_ing_idx = np.random.permutation(try_size)
-			for j in range(ingredient_num) :
-				idx = random_ing_idx[j]
-				ing_id = ingredient_book[now_ingredient_list[j]]
-				input_vector[0, idx*200:(idx+1)*200] = ing2vec_array[ing_id, :]
-			nowcost = f(input_vector, now_y)
-		# else, randomly take try_size ingredients and try for few times
-		else :
-			for run_epoch in range(3) :
-				random_ing_idx = np.random.permutation(ingredient_num)
-				for j in range(try_size) :
-					ing_id = ingredient_book[now_ingredient_list[random_ing_idx[j]]]
-					input_vector[0, j*200:(j+1)*200] = ing2vec_array[ing_id, :]
-				nowcost = f(input_vector, now_y)
+		input_vector = np.zeros((1, 200), dtype=theano.config.floatX)
+		for ing_name in now_ingredient_list :
+			ing_id = ingredient_book[ing_name]
+			weight = 1.0
+			if ing_id in frequent_list : print "hihi"
+			input_vector += weight*ing2vec_array[ing_id,:]
+		# normalize it 
+		input_vector = input_vector / np.linalg.norm(input_vector, axis=1)[0]
 
 		# run
 		nowcost = f(input_vector, now_y)
 
 		# learning rate decay
-		if i%8500==0 and i>0 and epoch<2:
+		if i%19000==0 and i>0 and epoch>=8 and epoch<12:
 			learning_rate *= 0.7
 
 		# validation data check : just once
-		if i%3000==0 and (i>0 or epoch>0):
+		if i%19000==0 and (i>0 or epoch>0):
 			p.set_value(0.0)
 			print "Validation data check for epoch %d, iteration %d" % (epoch, i)
 			error_num = 0.0
@@ -135,20 +126,15 @@ for epoch in range(10) :
 					if ing_name in ingredient_book : now_ingredient_list.append(ing_name)
 				ingredient_num = len(now_ingredient_list)
 
-				input_vector = np.zeros((1, try_size*200), dtype=theano.config.floatX)
-				# if ingredient number is same or less then try_size, just randomly distribute it
-				if ingredient_num <= try_size :
-					random_ing_idx = np.random.permutation(try_size)
-					for j in range(ingredient_num) :
-						idx = random_ing_idx[j]
-						ing_id = ingredient_book[now_ingredient_list[j]]
-						input_vector[0, idx*200:(idx+1)*200] = ing2vec_array[ing_id, :]
-				# else, randomly take try_siz ingredients
-				else :
-					random_ing_idx = np.random.permutation(ingredient_num)
-					for j in range(try_size) :
-						ing_id = ingredient_book[now_ingredient_list[random_ing_idx[j]]]
-						input_vector[0, j*200:(j+1)*200] = ing2vec_array[ing_id, :]
+				# make input vector
+				input_vector = np.zeros((1, 200), dtype=theano.config.floatX)
+				for ing_name in now_ingredient_list :
+					ing_id = ingredient_book[ing_name]
+					weight = 1.0
+					if ing_id in frequent_list : weight = 0.2
+					input_vector += weight*ing2vec_array[ing_id,:]
+				# normalize it 
+				input_vector = input_vector / np.linalg.norm(input_vector, axis=1)[0]
 
 				result = test_f(input_vector)
 				if result.argmax(axis=1)[0] != cuisine_book[now_recipe['cuisine']] :
@@ -156,6 +142,8 @@ for epoch in range(10) :
 			error_rate = error_num / val_num
 			print "Error rate : %f" % error_rate
 			p.set_value(0.3)
+
+	if epoch<20 : continue
 
 	final_data = pd.DataFrame(index=np.arange(test.shape[0]), columns=['id', 'cuisine'])
 
@@ -173,26 +161,16 @@ for epoch in range(10) :
 
 		result = 0
 		# make input vector
-		input_vector = np.zeros((1, try_size*200), dtype=theano.config.floatX)
-		# if ingredient number is same or less then try_size, just randomly distribute it & one shot
-		if ingredient_num <= try_size :
-			random_ing_idx = np.random.permutation(try_size)
-			for j in range(ingredient_num) :
-				idx = random_ing_idx[j]
-				ing_id = ingredient_book[now_ingredient_list[j]]
-				input_vector[0, idx*200:(idx+1)*200] = ing2vec_array[ing_id, :]
-			result = test_f(input_vector).argmax(axis=1)
-		# else, randomly take try_size ingredients and try for few times : linear to sqrt(ing_num)
-		else :
-			result_array = np.zeros((20,), dtype=theano.config.floatX)
-			for try_epoch in range(int(math.sqrt(ingredient_num))) :
-				random_ing_idx = np.random.permutation(ingredient_num)
-				for j in range(try_size) :
-					ing_id = ingredient_book[now_ingredient_list[random_ing_idx[j]]]
-					input_vector[0, j*200:(j+1)*200] = ing2vec_array[ing_id, :]
-				result_array += test_f(input_vector)[0,:]
-			result = result_array.argmax()
+		input_vector = np.zeros((1, 200), dtype=theano.config.floatX)
+		for ing_name in now_ingredient_list :
+			ing_id = ingredient_book[ing_name]
+			weight = 1.0
+			if ing_id in frequent_list : weight = 0.2
+			input_vector += weight*ing2vec_array[ing_id,:]
 
+		# normalize it 
+		input_vector = input_vector / np.linalg.norm(input_vector, axis=1)[0]
+		result = test_f(input_vector).argmax(axis=1)
 		final_data.loc[i, 'id'] = now_recipe['id']
 		final_data.loc[i, 'cuisine'] = cuisine_list[result]
 
